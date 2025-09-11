@@ -1,5 +1,6 @@
-torch>=2.0.0
-transformers>=4.30.0
+torch>=2.6.0
+transformers
 tqdm
 huggingface_hub
+accelerate
 

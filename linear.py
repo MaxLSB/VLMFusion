@@ -1,6 +1,6 @@
 import argparse
 import os
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForImageTextToText
 import torch
 from tqdm import tqdm
 
@@ -9,7 +9,7 @@ def load_models(vlm_repo, llm_repo):
     """Load VLM and LLM models and tokenizers."""
     print("Loading models...")
     vlm_tokenizer = AutoTokenizer.from_pretrained(vlm_repo)
-    vlm_model = AutoModel.from_pretrained(vlm_repo, dtype=torch.bfloat16, device_map="auto", trust_remote_code=True)
+    vlm_model = AutoModelForImageTextToText.from_pretrained(vlm_repo, dtype=torch.bfloat16, device_map="auto", trust_remote_code=True)
     
     llm_tokenizer = AutoTokenizer.from_pretrained(llm_repo)
     llm_model = AutoModelForCausalLM.from_pretrained(llm_repo, dtype=torch.bfloat16, device_map="auto")
@@ -23,18 +23,22 @@ def merge_models(vlm_model, llm_model, alpha=0.5):
     
     llm_weights = {}
     for name, param in llm_model.named_parameters():
-        if name.startswith("model."):
+        if name.startswith("model.") or name == "lm_head.weight":
             llm_weights[name] = param
 
     vlm_params_to_merge = []
     for name, param in vlm_model.named_parameters():
-        if name.startswith("language_model."):
+        if name.startswith("model.language_model.") or name == "lm_head.weight":
             vlm_params_to_merge.append((name, param))
 
     mismatches = 0
+    mismatch_details = []
     with torch.no_grad():
         for name, param in tqdm(vlm_params_to_merge, desc="Merging weights"):
-            llm_name = name.replace("language_model.", "model.")
+            if name.startswith("model.language_model."):
+                llm_name = name.replace("model.language_model.", "model.")
+            else:  # lm_head.weight
+                llm_name = name
             if llm_name in llm_weights:
                 llm_param = llm_weights[llm_name]
                 if param.shape == llm_param.shape:
@@ -42,11 +46,16 @@ def merge_models(vlm_model, llm_model, alpha=0.5):
                     param.data = alpha * param.data + (1 - alpha) * llm_param.data
                 else:
                     mismatches += 1
+                    mismatch_details.append(f"Shape mismatch: VLM {name} {param.shape} vs LLM {llm_name} {llm_param.shape}")
             else:
                 mismatches += 1
+                mismatch_details.append(f"Missing in LLM: {name} -> {llm_name}")
     
     if mismatches > 0:
         print(f"Warning: {mismatches} parameters were not merged due to mismatches.")
+        print("Mismatch details:")
+        for detail in mismatch_details:
+            print(f"  - {detail}")
     
     return mismatches
 
@@ -77,7 +86,6 @@ def push_to_huggingface(output_path, hf_repo_id, private=True):
         repo_id=hf_repo_id,
         repo_type="model"
     )
-
 
 def main():
     parser = argparse.ArgumentParser(description="Merge VLM and LLM models")

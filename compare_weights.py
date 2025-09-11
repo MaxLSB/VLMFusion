@@ -5,7 +5,7 @@ Returns the number of different weights.
 """
 
 import torch
-from transformers import AutoModel
+from transformers import AutoModelForImageTextToText
 import argparse
 import sys
 
@@ -14,11 +14,11 @@ def compare_model_weights(local_path, hf_model_name):
     try:
         # Load local model
         print(f"Loading local model from {local_path}...")
-        local_model = AutoModel.from_pretrained(local_path, dtype=torch.bfloat16)
+        local_model = AutoModelForImageTextToText.from_pretrained(local_path, dtype=torch.bfloat16)
         
         # Load HF model
         print(f"Loading HF model {hf_model_name}...")
-        hf_model = AutoModel.from_pretrained(hf_model_name, dtype=torch.bfloat16)
+        hf_model = AutoModelForImageTextToText.from_pretrained(hf_model_name, dtype=torch.bfloat16)
         
         # Compare weights
         different_weights = 0
