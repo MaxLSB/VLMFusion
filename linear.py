@@ -23,7 +23,7 @@ def load_model_config(model_type):
 
 def load_models(vlm_repo, llm_repo, device):
     """Load VLM and LLM models and tokenizers with model-specific configurations."""
-    model_type = detect_model_type(vlm_repo)
+    model_type = detect_model_type(vlm_repo, llm_repo)
     print(f"Loading {model_type.upper()} models...")
     print(f"Device: {device}")
 
@@ -42,31 +42,56 @@ def load_models(vlm_repo, llm_repo, device):
     return vlm_model, vlm_tokenizer, vlm_processor, llm_model, model_type
 
 
-def detect_model_type(vlm_repo):
-    """Detect model type by attempting to load with different AutoModel classes."""
+def detect_model_type(vlm_repo, llm_repo):
+    """Detect model type by checking the actual model class that gets loaded."""
     print("Detecting model type...")
-
-    # Try LFM2 first (most common)
+    
+    # Load VLM model and check its actual class
+    vlm_type = None
     try:
-        AutoModelForImageTextToText.from_pretrained(
+        vlm_model = AutoModelForImageTextToText.from_pretrained(
             vlm_repo, dtype="bfloat16", trust_remote_code=True
         )
-        return "lfm2"
-    except Exception:
-        pass
-
-    # Try Mistral
-    try:
-        AutoModelForCausalLM.from_pretrained(
-            vlm_repo, dtype="bfloat16", trust_remote_code=True
+        model_class_name = vlm_model.__class__.__name__
+        print(f"VLM loaded with class: {model_class_name}")
+        
+        # Check if it's LFM2 or Mistral based on the actual model class
+        if "LFM" in model_class_name.upper() or "LFM2" in model_class_name.upper():
+            vlm_type = "lfm2"
+            print(f"VLM detected as LFM2")
+        elif "MISTRAL" in model_class_name.upper():
+            vlm_type = "mistral"
+            print(f"VLM detected as Mistral")
+        else:
+            # Try to infer from model name or other characteristics
+            if "mistral" in vlm_repo.lower():
+                vlm_type = "mistral"
+                print(f"VLM inferred as Mistral from repository name")
+            else:
+                vlm_type = "lfm2"
+                print(f"VLM inferred as LFM2 from repository name")
+                
+    except Exception as e:
+        raise ValueError(
+            f"Could not load VLM model {vlm_repo}. Error: {str(e)}. "
+            f"Supported VLM models: LFM2 or Mistral (both use AutoModelForImageTextToText)"
         )
-        return "mistral"
-    except Exception:
-        pass
-
-    raise ValueError(
-        f"Could not detect model type for {vlm_repo}. Supported models: LFM2 (AutoModelForImageTextToText) or Mistral (AutoModelForCausalLM)"
-    )
+    
+    # Load LLM model and verify it's compatible
+    try:
+        llm_model = AutoModelForCausalLM.from_pretrained(
+            llm_repo, dtype="bfloat16", trust_remote_code=True
+        )
+        llm_class_name = llm_model.__class__.__name__
+        print(f"LLM loaded with class: {llm_class_name}")
+        print(f"LLM verified as compatible with {vlm_type.upper()}")
+    except Exception as e:
+        raise ValueError(
+            f"Could not load LLM model {llm_repo}. Error: {str(e)}"
+        )
+    
+    print(f"Detected compatible {vlm_type.upper()} models")
+    return vlm_type
 
 
 def merge_models(vlm_model, llm_model, model_type, alpha=0.5):

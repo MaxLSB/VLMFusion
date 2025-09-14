@@ -2,7 +2,7 @@ from transformers import AutoTokenizer, AutoModelForImageTextToText, AutoProcess
 from huggingface_hub import create_repo
 
 # Define your repo and local folder
-repo_id = "kurakurai/Luth-LFM2-VL-350M-linear-0.5"
+repo_id = "lightonai/Mistral-VLM-French-0.8"
 folder_path = "merged_model"
 
 # Create repo if it doesn't exist
