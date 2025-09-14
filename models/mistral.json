@@ -1,0 +1,5 @@
+{
+  "vlm_prefix": "model.language_model.",
+  "llm_prefix": "model.",
+  "include_lm_head": true
+}

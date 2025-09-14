@@ -1,6 +1,6 @@
-torch>=2.6.0
-transformers
-tqdm
-huggingface_hub
-accelerate
+torch==2.8.0
+transformers==4.56.1
+tqdm==4.67.1
+accelerate==1.10.1
+Pillow==11.3.0
 
