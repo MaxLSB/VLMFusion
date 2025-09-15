@@ -21,6 +21,16 @@ def load_model_config(model_type):
     return config
 
 
+def count_parameters(model, model_name="Model"):
+    """Count total parameters in a model."""
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"{model_name} Parameters:")
+    print(f"  Total: {total_params:,}")
+    print(f"  Trainable: {trainable_params:,}")
+    return total_params, trainable_params
+
+
 def load_models(vlm_repo, llm_repo, device):
     """Load VLM and LLM models and tokenizers with model-specific configurations."""
     model_type = detect_model_type(vlm_repo, llm_repo)
@@ -39,7 +49,13 @@ def load_models(vlm_repo, llm_repo, device):
         device
     )
 
-    return vlm_model, vlm_tokenizer, vlm_processor, llm_model, model_type
+    # Count parameters in both models
+    print("\n" + "="*60)
+    vlm_total, vlm_trainable = count_parameters(vlm_model, "VLM")
+    llm_total, llm_trainable = count_parameters(llm_model, "LLM")
+    print("="*60)
+
+    return vlm_model, vlm_tokenizer, vlm_processor, llm_model, model_type, vlm_total, llm_total
 
 
 def detect_model_type(vlm_repo, llm_repo):
@@ -97,7 +113,7 @@ def detect_model_type(vlm_repo, llm_repo):
 def merge_models(vlm_model, llm_model, model_type, alpha=0.5):
     """Merge VLM and LLM models using linear combination (alpha * VLM + (1-alpha) * LLM)."""
     config = load_model_config(model_type)
-    print(f"Merging models (α={alpha})...")
+    print(f"\nMerging models (α={alpha})...")
 
     # Collect LLM weights for merging
     llm_weights = {
@@ -115,7 +131,18 @@ def merge_models(vlm_model, llm_model, model_type, alpha=0.5):
         or (config["include_lm_head"] and name == "lm_head.weight")
     ]
 
+    # Count parameters before merging
+    total_vlm_params = sum(p.numel() for _, p in vlm_params_to_merge)
+    total_llm_params = sum(p.numel() for p in llm_weights.values())
+    
+    print(f"\nParameter Statistics:")
+    print(f"  VLM parameters to merge: {total_vlm_params:,}")
+    print(f"  LLM parameters available: {total_llm_params:,}\n")
+
     mismatches = 0
+    merged_params = 0
+    merged_param_count = 0
+    
     with torch.no_grad():
         for name, param in tqdm(vlm_params_to_merge, desc="Merging weights"):
             # Convert VLM parameter name to LLM parameter name
@@ -132,22 +159,29 @@ def merge_models(vlm_model, llm_model, model_type, alpha=0.5):
                     llm_param = llm_param.to(device=param.device, dtype=param.dtype)
                     # Linear combination: alpha * VLM + (1-alpha) * LLM
                     param.data = alpha * param.data + (1 - alpha) * llm_param.data
+                    merged_params += 1
+                    merged_param_count += param.numel()
                 else:
                     mismatches += 1
             else:
                 mismatches += 1
 
+    print(f"\nMerge Results:")
+    print(f"  Parameters successfully merged: {merged_params:,}")
+    print(f"  Total elements merged: {merged_param_count:,}")
+    print(f"  Parameters that couldn't be merged: {mismatches:,}")
+    
     if mismatches > 0:
         print(f"Warning: {mismatches} parameters could not be merged")
     else:
         print("✓ All parameters merged successfully")
 
-    return
+    return merged_params, merged_param_count, mismatches
 
 
 def save_model(vlm_model, vlm_tokenizer, vlm_processor, output_path):
     """Save the merged model, tokenizer, and processor to the specified path."""
-    print("Saving model...")
+    print("\nSaving model...")
     os.makedirs(output_path, exist_ok=True)
     vlm_model.save_pretrained(output_path, safe_serialization=True)
     vlm_tokenizer.save_pretrained(output_path)
@@ -157,7 +191,7 @@ def save_model(vlm_model, vlm_tokenizer, vlm_processor, output_path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Merge VLM and LLM models (supports Mistral and LFM2)"
+        description="Merge VLM and LLM models (supports Mistral and LFM2) with parameter counting"
     )
     parser.add_argument(
         "--vlm_repo", type=str, required=True, help="VLM model repository"
@@ -191,16 +225,25 @@ def main():
     print(f"Device: {device} | α: {args.alpha}")
     print("-" * 50)
 
-    vlm_model, vlm_tokenizer, vlm_processor, llm_model, model_type = load_models(
+    vlm_model, vlm_tokenizer, vlm_processor, llm_model, model_type, vlm_total, llm_total = load_models(
         args.vlm_repo, args.llm_repo, device
     )
 
     print(f"Model: {model_type.upper()}")
 
-    merge_models(vlm_model, llm_model, model_type, args.alpha)
+    merged_params, merged_param_count, mismatches = merge_models(vlm_model, llm_model, model_type, args.alpha)
 
     save_model(vlm_model, vlm_tokenizer, vlm_processor, args.output_path)
 
+    print("\n" + "="*60)
+    print("FINAL SUMMARY:")
+    print(f"  VLM total parameters: {vlm_total:,}")
+    print(f"  LLM total parameters: {llm_total:,}")
+    print(f"  Parameters merged: {merged_params:,}")
+    print(f"  Elements merged: {merged_param_count:,}")
+    print(f"  Merge failures: {mismatches:,}")
+    print(f"  Merge success rate: {merged_params/(merged_params+mismatches)*100:.1f}%")
+    print("="*60)
     print("✓ Merge completed successfully!")
 
 
